@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <title>단진자 운동</title>
+    <script src="https://cdn.jsdelivr.net/npm/p5@1.7.0/lib/p5.min.js"></script>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>단진자 운동</h1>
+      <a href="project.html">← 메인으로</a>
+    </header>
+    <main>
+      <div id="canvas-container"></div>
+      <div id="controls-container">
+        <div id="ui-controls"></div>
+      </div>
+    </main>
+    <script>
+      // ===================================================
+      // 전역 변수
+      // ===================================================
+
+      // --- 캔버스 관련 변수 ---
+      const sim_height = 350; // 시뮬레이션 영역 높이
+      const graph_height = 270; // 그래프 영역 높이
+      const total_height = sim_height + graph_height;
+      let originX, originY; // 진자 고정점 좌표
+
+      // --- 물리 관련 변수 ---
+      let L, m, g, damping; // 줄 길이(Length), 질량(mass), 중력가속도(gravity), 댐핑(damping)
+      let theta, omega; // 각도(theta), 각속도(omega)
+      let theta_linear, omega_linear; // 선형 모델 각도, 각속도
+      let time = 0; // 경과 시간
+
+      // --- 시뮬레이션 상태 관련 변수 ---
+      let running = false;
+      let theta0; // 초기 각도 (라디안)
+
+      // --- UI 관련 변수 ---
+      let startBtn, resetBtn;
+      let thetaSlider, lengthSlider, massSlider, dampSlider;
+
+      // --- 그래프 관련 변수 ---
+      let energyHistory = []; // 에너지 데이터 저장
+      let maxY; // 에너지 그래프 Y축 최댓값
+
+      // ===================================================
+      // p5.js
+      // ===================================================
+
+      function setup() {
+        const canvas = createCanvas(600, total_height);
+        canvas.parent("canvas-container");
+        originX = width / 2;
+        originY = 70;
+
+        initializeControls(); // UI 컨트롤 요소 생성 및 설정
+        resetSimulation(); // 모든 변수를 초기 상태로 리셋
+      }
+
+      function draw() {
+        background(255); // 캔버스 배경 흰색
+        UI_update(); // 슬라이더 값에 따른 텍스트 화면 업데이트
+
+        // 'running' 상태일 때만 물리 계산 실행
+        if (running) {
+          let dt = min(deltaTime / 1000, 1 / 30); // 프레임 간 시간 간격(dt) 계산 (최대 1/30초)
+          time += dt; // 경과 시간 누적
+          physics(dt); // 다음 상태 계산
+          Energy(); // 현재 에너지 값 기록
+
+          // 진자가 거의 멈췄을 때 자동 정지
+          if (abs(theta) < 0.001 && abs(omega) < 0.001) {
+            running = false;
+          }
+        }
+
+        pendulum(); // 진자 시뮬
+        graph(); // 에너지 그래프
+      }
+
+      // ===================================================
+      // 시뮬레이션 설정 함수
+      // ===================================================
+
+      /**
+       * 슬라이더, 버튼
+       */
+      function initializeControls() {
+        const controls = select("#ui-controls");
+        const createGroup = (labelText) => {
+          const group = createDiv().addClass("control-group").parent(controls);
+          createSpan(labelText).parent(group);
+          return group;
+        };
+
+        let group;
+        group = createGroup(
+          "θ₀ (초기 각도) : <strong id='thetaVal'>30°</strong>"
+        );
+        thetaSlider = createSlider(-89, 89, 30, 1).parent(group);
+        group = createGroup(
+          "줄 길이 (L) : <strong id='lengthVal'>200</strong>"
+        );
+        lengthSlider = createSlider(50, 300, 200, 1).parent(group);
+        group = createGroup("질량 (m) : <strong id='massVal'>1</strong>");
+        massSlider = createSlider(0.1, 10, 1, 0.1).parent(group);
+        group = createGroup("댐핑 : <strong id='dampVal'>0.02</strong>");
+        dampSlider = createSlider(0, 0.2, 0.04, 0.001).parent(group);
+
+        const btnGroup = createDiv().style("margin-top:20px").parent(controls);
+        startBtn = createButton("▶ 시작").parent(btnGroup);
+        startBtn.mousePressed(() => (running = !running));
+        resetBtn = createButton("⟲ 리셋").parent(btnGroup);
+        resetBtn.mousePressed(resetSimulation);
+      }
+
+      /**
+       * UI 컨트롤의 현재 값에 맞춰 변수 리셋
+       */
+      function resetSimulation() {
+        // 물리 변수 초기화
+        theta0 = radians(thetaSlider.value());
+        theta = theta0;
+        omega = 0;
+        theta_linear = theta0;
+        omega_linear = 0;
+        L = lengthSlider.value();
+        m = massSlider.value();
+        g = 9.8 * 20; // 중력가속도 9.8 m/s^2 (픽셀 스케일 적용)
+        damping = dampSlider.value();
+
+        // 상태 변수 초기화
+        running = false;
+        time = 0;
+
+        // 그래프 데이터 초기화
+        energyHistory = [];
+        maxY = m * g * (L * (1 - Math.cos(theta0)));
+        if (maxY === 0) maxY = 1; // 0으로 나누는 것 방지
+        Energy(); // 0초 상태의 에너지 기록
+      }
+
+      // ===================================================
+      // 물리 계산 함수
+      // ===================================================
+
+      /**
+       * 현재 상태(th, om), 비선형/선형(func), 시간 간격(dt)을 입력받아
+       * 다음 스텝의 [각도, 각속도] 반환
+       */
+      function rk4(th, om, func, dt) {
+        const k1_th = om;
+        const k1_om = func(th, om);
+        const k2_th = om + 0.5 * dt * k1_om;
+        const k2_om = func(th + 0.5 * dt * k1_th, om + 0.5 * dt * k1_om);
+        const k3_th = om + 0.5 * dt * k2_om;
+        const k3_om = func(th + 0.5 * dt * k2_th, om + 0.5 * dt * k2_om);
+        const k4_th = om + dt * k3_om;
+        const k4_om = func(th + dt * k3_th, om + dt * k3_om);
+        const new_th = th + (dt / 6) * (k1_th + 2 * k2_th + 2 * k3_th + k4_th);
+        const new_om = om + (dt / 6) * (k1_om + 2 * k2_om + 2 * k3_om + k4_om);
+        return [new_th, new_om];
+      }
+
+      /**
+       * 비선형 모델의 운동방정식. 각가속도 반환
+       * α = -(g/L)sin(θ) - cω
+       */
+      function non_linear(th, om) {
+        return -(g / L) * Math.sin(th) - damping * om;
+      }
+
+      /**
+       * 선형 근사 모델의 운동방정식. 각가속도 반환
+       * α = -(g/L)θ - cω (sin(θ) ≈ θ 근사)
+       */
+      function linear(th, om) {
+        return -(g / L) * th - damping * om;
+      }
+
+      /**
+       * rk4 함수를 사용하여 각 모델의 다음 상태 계산
+       */
+      function physics(dt) {
+        // --- 비선형 ---
+        [theta, omega] = rk4(theta, omega, non_linear, dt);
+
+        // --- 선형 ---
+        [theta_linear, omega_linear] = rk4(
+          theta_linear,
+          omega_linear,
+          linear,
+          dt
+        );
+      }
+
+      /**
+       * 현재 시점의 운동에너지와 위치에너지 계산, energyHistory에 추가
+       */
+      function Energy() {
+        const kineticEnergy = 0.5 * m * pow(L * omega, 2);
+        const potentialEnergy = m * g * (L * (1 - Math.cos(theta)));
+        energyHistory.push({
+          ke: kineticEnergy,
+          pe: potentialEnergy,
+          total: kineticEnergy + potentialEnergy,
+        });
+        if (energyHistory.length > 300) {
+          energyHistory.shift(); // 배열 길이가 300을 넘으면 가장 오래된 데이터 제거
+        }
+      }
+
+      // ===================================================
+      // UI 업데이트 및 시각화 함수
+      // ===================================================
+
+      /**
+       * 컨트롤 패널의 텍스트 값을 현재 슬라이더 값으로 업데이트
+       * 시뮬레이션이 멈춰있을 때 슬라이더 값이 변경되면 리셋 함수 호출
+       */
+      function UI_update() {
+        select("#thetaVal").html(thetaSlider.value() + "°");
+        select("#lengthVal").html(lengthSlider.value());
+        select("#massVal").html(massSlider.value());
+        select("#dampVal").html(dampSlider.value());
+        startBtn.html(running ? "⏸ 정지" : "▶ 시작");
+
+        if (!running && frameCount > 0) {
+          const slidersChanged =
+            L !== lengthSlider.value() ||
+            m !== massSlider.value() ||
+            damping !== dampSlider.value() ||
+            theta0 !== radians(thetaSlider.value());
+          if (slidersChanged) {
+            resetSimulation();
+          }
+        }
+      }
+
+      /**
+       * 두 진자(비선형, 선형)와 경과 시간 표시
+       */
+      function pendulum() {
+        textStyle(BOLD);
+        const bobX = originX + L * Math.sin(theta);
+        const bobY = originY + L * Math.cos(theta);
+        const bobX_linear = originX + L * Math.sin(theta_linear);
+        const bobY_linear = originY + L * Math.cos(theta_linear);
+        const bobSize = constrain(10 + m * 6, 8, 60);
+
+        // 선형 모델 (점선, 반투명 파랑)
+        stroke(150);
+        strokeWeight(1);
+        drawingContext.setLineDash([5, 5]);
+        line(originX, originY, bobX_linear, bobY_linear);
+        drawingContext.setLineDash([]);
+        stroke(0);
+        strokeWeight(1);
+        fill(50, 50, 180, 150);
+        ellipse(bobX_linear, bobY_linear, bobSize, bobSize);
+
+        // 비선형 모델 (실선, 빨강)
+        stroke(0);
+        strokeWeight(2);
+        line(originX, originY, bobX, bobY);
+        fill(180, 50, 50);
+        ellipse(bobX, bobY, bobSize, bobSize);
+
+        // 고정점
+        fill(0);
+        noStroke();
+        ellipse(originX, originY, 10, 10);
+
+        // 모델 종류 표기
+        textAlign(LEFT);
+        textSize(14);
+        noStroke();
+        fill(180, 50, 50);
+        text("비선형 모델 (sin θ)", 20, 30);
+        fill(50, 50, 180);
+        text("선형 근사 모델 (θ)", 20, 50);
+
+        // 경과 시간
+        push();
+        textAlign(RIGHT, TOP);
+        noStroke();
+        fill(0);
+        text(`경과 시간: ${time.toFixed(1)}s`, width - 20, 20);
+        pop();
+      }
+
+      /**
+       * 에너지 그래프
+       */
+      function graph() {
+        push(); // 현재 좌표계, 설정 저장
+        translate(0, sim_height); // 그래프를 그릴 위치로 원점 이동
+
+        fill(255);
+        noStroke();
+        rect(0, 0, width, graph_height); // 그래프 배경
+
+        textStyle(BOLD);
+        const padding = 40;
+        textAlign(LEFT, TOP);
+        noStroke();
+        fill(0);
+        textSize(16);
+        text("[ 에너지 그래프 ]", padding, 15);
+
+        if (energyHistory.length < 2) {
+          pop();
+          return;
+        }
+
+        // 축 그리기
+        stroke(220);
+        strokeWeight(1);
+        line(padding, padding, padding, graph_height - padding); // Y축
+        line(
+          padding,
+          graph_height - padding,
+          width - padding,
+          graph_height - padding
+        ); // X축
+
+        // 에너지 데이터 플로팅
+        const plotData = (dataKey, c) => {
+          stroke(c);
+          strokeWeight(2);
+          noFill();
+          beginShape();
+          for (let i = 0; i < energyHistory.length; i++) {
+            const x = map(
+              i,
+              0,
+              energyHistory.length - 1,
+              padding,
+              width - padding
+            );
+            const y = map(
+              energyHistory[i][dataKey],
+              0,
+              maxY,
+              graph_height - padding,
+              padding
+            );
+            vertex(x, y);
+          }
+          endShape();
+        };
+
+        plotData("pe", color(220, 50, 50)); // 위치 에너지
+        plotData("ke", color(50, 50, 220)); // 운동 에너지
+        plotData("total", color(0)); // 총 에너지
+
+        // 에너지 종류 표기
+        noStroke();
+        textAlign(CENTER);
+        textStyle(BOLD);
+        textSize(13);
+        fill(220, 50, 50);
+        text("위치 E", 100, graph_height - 30);
+        fill(50, 50, 220);
+        text("운동 E", 180, graph_height - 30);
+        fill(0);
+        text("총 E", 250, graph_height - 30);
+
+        pop(); // 이전 좌표계, 설정으로 복원
+      }
+    </script>
+  </body>
+</html>

@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <title>실험 1 - 물리 실험 시뮬레이터</title>
+    <link rel="stylesheet" href="style.css" />
+    <!-- p5.js 라이브러리 -->
+    <script src="https://cdn.jsdelivr.net/npm/p5@1.7.0/lib/p5.min.js"></script>
+  </head>
+  <body>
+    <header>
+      <h1>실험 1: 낙하 및 포물선 운동</h1>
+      <a href="project.html">← 메인으로</a>
+    </header>
+
+    <main>
+      <div id="canvas-container"></div>
+
+      <div id="controls-container">
+        <div id="ui-controls"></div>
+      </div>
+    </main>
+
+    <script>
+      // 전역 변수
+      let y, vy, x2, y2, vx2, vy2, g, v0;
+      let running = false;
+      let ball1_stopped, ball2_stopped;
+      const margin = 50,
+        scale = 5,
+        ballSize = 25;
+      let v0Slider, vxSlider, gSlider, kSlider;
+      let start, reset;
+      let airResistance, record;
+      let v0ValueSpan, vxValueSpan, gValueSpan, kValueSpan;
+      let recordList = [],
+        recordTime = 0;
+
+      function setup() {
+        const canvas = createCanvas(600, 400);
+        canvas.parent("canvas-container");
+
+        const controls = select("#ui-controls");
+
+        // v0 슬라이더
+        const v0Group = createDiv().addClass("control-group").parent(controls);
+        createSpan("초기 수직 속도 v₀ (m/s): ").parent(v0Group);
+        v0Slider = createSlider(0, 50, 20, 1).parent(v0Group);
+        v0ValueSpan = createSpan(v0Slider.value()).parent(v0Group);
+
+        // vx 슬라이더
+        const vxGroup = createDiv().addClass("control-group").parent(controls);
+        createSpan("초기 수평 속도 vₓ (m/s): ").parent(vxGroup);
+        vxSlider = createSlider(0, 50, 20, 1).parent(vxGroup);
+        vxValueSpan = createSpan(vxSlider.value()).parent(vxGroup);
+
+        // g 슬라이더
+        const gGroup = createDiv().addClass("control-group").parent(controls);
+        createSpan("중력 가속도 g (m/s²): ").parent(gGroup);
+        gSlider = createSlider(1, 20, 9.8, 0.1).parent(gGroup);
+        gValueSpan = createSpan(gSlider.value()).parent(gGroup);
+
+        // k 슬라이더 (공기 저항 계수)
+        const kGroup = createDiv().addClass("control-group").parent(controls);
+        createSpan("공기 저항 계수 k: ").parent(kGroup);
+        kSlider = createSlider(0, 0.1, 0.02, 0.001).parent(kGroup);
+        kValueSpan = createSpan(kSlider.value()).parent(kGroup);
+
+        // 체크박스 옵션
+        const optionsGroup = createDiv()
+          .addClass("options-group")
+          .parent(controls);
+        airResistance = createCheckbox("공기 저항", false).parent(optionsGroup);
+        record = createCheckbox("0.5초마다 위치 기록", true).parent(
+          optionsGroup
+        );
+
+        // 시작/리셋 버튼
+        const btnGroup = createDiv()
+          .style("margin-top", "20px")
+          .parent(controls);
+        start = createButton("▶ 시작").parent(btnGroup);
+        start.mousePressed(() => {
+          if (!running) {
+            resetBalls();
+            running = true;
+          }
+        });
+        reset = createButton("⟲ 리셋").parent(btnGroup);
+        reset.mousePressed(resetBalls);
+
+        resetBalls();
+      }
+
+      function draw() {
+        background(255);
+
+        // 현재 슬라이더 값 표시
+        v0ValueSpan.html(v0Slider.value());
+        vxValueSpan.html(vxSlider.value());
+        gValueSpan.html(gSlider.value());
+        kValueSpan.html(kSlider.value());
+
+        drawGrid(); // 배경 격자
+        drawSnapshots(); // 기록된 위치 점 그리기
+
+        // 공1 (낙하)
+        fill("rgb(141,206,255)");
+        noStroke();
+        circle(margin, y, ballSize);
+
+        // 공2 (포물선)
+        fill("rgb(255,194,192)");
+        noStroke();
+        circle(x2, y2, ballSize);
+
+        // 시뮬레이션 실행 중이면 물리 업데이트
+        if (running) {
+          updatePhysics();
+          handleSnapshots();
+          if (ball1_stopped && ball2_stopped) running = false;
+        }
+      }
+
+      /**
+       * updatePhysics()
+       *
+       * 물리 모델 요약 (단순화)
+       * - 질량 m = 1 (단위 단순화)
+       * - 중력: g (m/s^2). 화면 단위로 변환: gravityForce = g * scale (px/s^2)
+       * - 공기 저항(항력): F_d = -k * v * |v|
+       *   -> 항력은 속도 제곱에 비례하며 방향은 속도 반대
+       * - 수직 방향 미분방정식:
+       *     dv_y/dt = g + (-k * v_y * |v_y|)
+       *   수평 방향 미분방정식(공2):
+       *     dv_x/dt = -k * v_x * |v_x|
+       *
+       * 수치해석 방법 (여기서 사용한 방법)
+       * - 시간 간격 dt = deltaTime / 1000 (초)
+       * - 속도 업데이트: v(t+dt) = v(t) + a(t) * dt
+       * - 위치 업데이트: x(t+dt) = x(t) + v(t+dt) * dt
+       *   -> 코드에서는 '속도를 먼저 업데이트한 다음 그 속도로 위치를 업데이트' 함
+       *   -> 이 방식은 전형적인 명시적 오일러보다 안정성이 약간 나은 준대칭(반응적 오일러, semi-implicit Euler) 방식
+       *
+       * 수치적 고려사항
+       * - dt가 크면 오차가 커지고 불안정해질 수 있음. 일반적으로 프레임 간격(예: 16ms)이면 괜찮음.
+       * - k가 크면 항력이 강해져 속도가 빠르게 감소. 극단적 경우 수치적 진동 발생 가능.
+       *
+       * 경계 처리
+       * - 바닥(ground)에 닿으면 y를 경계 위치로 정하고 '정지' 상태로 표시(튀김 없음)
+       * - 오른쪽 벽(rightWall)에 닿으면 x를 경계 위치로 정하고 '정지' 상태로 표시
+       *
+       * 단순화/가정
+       * - 바운스, 마찰, 회전 등은 고려하지 않음
+       * - 질량 m은 1로 가정했음(실제 물리량을 화면 좌표로 맵핑하는 데 더 신경 써야 함)
+       */
+      function updatePhysics() {
+        // 프레임 간 시간 간격 (초 단위)
+        let dt = deltaTime / 1000;
+
+        // 슬라이더에서 값 읽기
+        g = gSlider.value();
+        // 공기 저항 계수 k: 체크박스가 켜져 있을 때만 사용
+        const k = airResistance.checked() ? kSlider.value() : 0;
+
+        // 시각화용 변환: m/s^2 -> px/s^2
+        const gravityForce = g * scale;
+
+        // 경계 좌표 (화면 내부)
+        const ground = height - margin;
+        const rightWall = width - margin;
+
+        // -------------------
+        // 공1: 단순 수직 낙하
+        // 미분방정식: dv_y/dt = g + (-k * v_y * |v_y|)
+        // 수치해석: vy += a * dt; y += vy * dt;
+        // -------------------
+        if (!ball1_stopped) {
+          // 항력(수직)
+          let airForceY1 = -k * vy * abs(vy); // -k * v * |v|
+          // 총 가속도 (화면 단위)
+          let accY1 = gravityForce + airForceY1;
+          // 속도 업데이트 (semi-implicit Euler: v(t+dt) 계산 후 위치 업데이트)
+          vy += accY1 * dt;
+          // 위치 업데이트 (갱신된 속도로 이동)
+          y += vy * dt;
+
+          // 바닥 충돌 처리: 바닥보다 아래로 가면 경계로 고정하고 정지 상태로 표시
+          if (y + ballSize / 2 >= ground) {
+            y = ground - ballSize / 2;
+            ball1_stopped = true;
+          }
+        }
+
+        // -------------------
+        // 공2: 포물선 (수평+수직)
+        // 수직: dv_y/dt = g + (-k * v_y * |v_y|)
+        // 수평: dv_x/dt = -k * v_x * |v_x|
+        // -------------------
+        if (!ball2_stopped) {
+          // 수직 항력 및 가속도
+          let airForceY2 = -k * vy2 * abs(vy2);
+          let accY2 = gravityForce + airForceY2;
+          vy2 += accY2 * dt;
+          y2 += vy2 * dt;
+
+          // 수평 항력 및 속도 업데이트
+          let airForceX2 = -k * vx2 * abs(vx2);
+          vx2 += airForceX2 * dt;
+          x2 += vx2 * dt;
+
+          // 경계 체크: 바닥 또는 오른쪽 벽에 닿으면 위치 보정 후 정지
+          let touchBoundary = false;
+          if (y2 + ballSize / 2 >= ground) {
+            y2 = ground - ballSize / 2;
+            touchBoundary = true;
+          }
+          if (x2 + ballSize / 2 >= rightWall) {
+            x2 = rightWall - ballSize / 2;
+            touchBoundary = true;
+          }
+          if (touchBoundary) ball2_stopped = true;
+        }
+      }
+
+      function handleSnapshots() {
+        // 0.5초마다 위치 기록 (시각화용)
+        if (record.checked()) {
+          recordTime += deltaTime / 1000;
+          if (recordTime >= 0.5) {
+            recordList.push({
+              y1: y,
+              x2: x2,
+              y2: y2,
+              s1: ball1_stopped,
+              s2: ball2_stopped,
+            });
+            recordTime = 0;
+          }
+        }
+      }
+
+      function drawSnapshots() {
+        // 저장된 위치를 반투명 원으로 표시
+        for (const s of recordList) {
+          if (!s.s1) {
+            fill(141, 206, 255, 70);
+            noStroke();
+            circle(margin, s.y1, ballSize);
+          }
+          if (!s.s2) {
+            fill(255, 194, 192, 70);
+            noStroke();
+            circle(s.x2, s.y2, ballSize);
+          }
+        }
+      }
+
+      function resetBalls() {
+        v0 = v0Slider ? v0Slider.value() : 20;
+        const vx = vxSlider ? vxSlider.value() : 15;
+
+        // 공1 초기화
+        y = margin;
+        vy = v0 * scale;
+
+        // 공2 초기화
+        x2 = margin + 10 * scale;
+        y2 = margin;
+        vx2 = vx * scale;
+        vy2 = v0 * scale;
+
+        recordList = [];
+        recordTime = 0;
+        running = false;
+        ball1_stopped = false;
+        ball2_stopped = false;
+
+        // 초기 위치도 기록
+        recordList.push({
+          y1: y,
+          x2: x2,
+          y2: y2,
+          s1: false,
+          s2: false,
+        });
+      }
+
+      function drawGrid() {
+        // 눈금선 및 숫자 표시
+        fill(150);
+        stroke(180);
+        strokeWeight(0.5);
+        textSize(10);
+        textAlign(CENTER, CENTER);
+
+        // y축 격자
+        for (let yPos = margin; yPos <= height - margin; yPos += scale * 5) {
+          line(margin, yPos, width - margin, yPos);
+          let gridY = (yPos - margin) / scale;
+          if (gridY % 5 === 0) text(round(gridY), margin - 25, yPos);
+        }
+
+        // x축 격자
+        for (let xPos = margin; xPos <= width - margin; xPos += scale * 5) {
+          line(xPos, margin, xPos, height - margin);
+          let gridX = (xPos - margin) / scale;
+          if (gridX % 5 === 0) text(round(gridX), xPos, height - margin + 20);
+        }
+      }
+    </script>
+  </body>
+</html>
