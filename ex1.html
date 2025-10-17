@@ -2,14 +2,15 @@
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
-    <title>실험 1 - 물리 실험 시뮬레이터</title>
+    <title>낙하 및 포물선 운동</title>
     <link rel="stylesheet" href="style.css" />
-    <!-- p5.js 라이브러리 -->
     <script src="https://cdn.jsdelivr.net/npm/p5@1.7.0/lib/p5.min.js"></script>
   </head>
   <body>
     <header>
-      <h1>실험 1: 낙하 및 포물선 운동</h1>
+      <h1>
+        낙하 및 포물선 운동 | 공기 저항과 종단 속도 | 물리 실험 시뮬레이터
+      </h1>
       <a href="index.html">← 메인으로</a>
     </header>
 
@@ -22,194 +23,257 @@
     </main>
 
     <script>
+      // ===================================================
       // 전역 변수
-      let y, vy, x2, y2, vx2, vy2, g, v0;
-      let running = false;
-      let ball1_stopped, ball2_stopped;
-      const margin = 50,
-        scale = 5,
-        ballSize = 25;
+      // ===================================================
+
+      // --- 캔버스 관련 변수 ---
+      const sim_height = 350; // 시뮬레이션 영역 높이
+      const graph_height = 270; // 그래프 영역 높이
+      const total_height = sim_height + graph_height;
+
+      // --- 물리 관련 변수 ---
+      let y, vy, x2, y2, vx2, vy2, g, v0, k, vx0; // 공의 위치 및 속도, 중력 가속도, 공기 저항 계수
+      let running = false; // 시뮬레이션 실행 상태
+      let ball1_stopped, ball2_stopped; // 각 공의 정지 상태
+      const margin = 50, // 캔버스 여백
+        scale = 5, // 픽셀 스케일링 (1m = 5px)
+        ballSize = 25; // 공 크기
+      let time = 0; // 경과 시간
+
+      // --- UI 관련 변수 ---
       let v0Slider, vxSlider, gSlider, kSlider;
       let start, reset;
       let airResistance, record;
-      let v0ValueSpan, vxValueSpan, gValueSpan, kValueSpan;
-      let recordList = [],
+
+      // --- 기록 및 그래프 관련 변수 ---
+      let recordList = [], // 위치 기록 배열
         recordTime = 0;
+      let dataHistory = []; // 그래프 데이터 배열
+      let maxY_energy; // 에너지 그래프 Y축 최댓값
+      let maxY_vel; // 속도 그래프 Y축 최댓값
+
+      // ===================================================
+      // p5.js
+      // ===================================================
 
       function setup() {
-        const canvas = createCanvas(600, 400);
+        const canvas = createCanvas(600, total_height);
         canvas.parent("canvas-container");
 
+        resetControls(); // UI 컨트롤 요소 생성 및 설정
+        resetSimulation(); // 모든 변수를 초기 상태로 리셋
+      }
+
+      function draw() {
+        background(255); // 캔버스 배경 흰색
+
+        // 실행 상태에 따라 시작/정지 버튼 텍스트 변경
+        start.html(running ? "⏸ 정지" : "▶ 시작");
+
+        // 'running' 상태일 때만 계산
+        if (running) {
+          updatePhysics();
+          recordTrace();
+          calculateData();
+          // 두 공이 모두 멈췄을 때 시뮬레이션 종료
+          if (ball1_stopped && ball2_stopped) {
+            running = false;
+          }
+        }
+
+        // 시각화 함수 호출
+        drawGrid();
+        drawTrace();
+        drawBalls();
+        drawTimeText();
+        drawGraphs();
+      }
+
+      // ===================================================
+      // 시뮬레이션 설정 및 UI 함수
+      // ===================================================
+
+      /**
+       * 슬라이더, 버튼 생성 & 설정
+       */
+      function resetControls() {
         const controls = select("#ui-controls");
 
-        // v0 슬라이더
-        const v0Group = createDiv().addClass("control-group").parent(controls);
-        createSpan("초기 수직 속도 v₀ (m/s): ").parent(v0Group);
-        v0Slider = createSlider(0, 50, 20, 1).parent(v0Group);
-        v0ValueSpan = createSpan(v0Slider.value()).parent(v0Group);
+        // 컨트롤 그룹(라벨 + 슬라이더) 생성
+        const createGroup = (labelText) => {
+          const group = createDiv().addClass("control-group").parent(controls);
+          createSpan(labelText).parent(group);
+          return group;
+        };
 
-        // vx 슬라이더
-        const vxGroup = createDiv().addClass("control-group").parent(controls);
-        createSpan("초기 수평 속도 vₓ (m/s): ").parent(vxGroup);
-        vxSlider = createSlider(0, 50, 20, 1).parent(vxGroup);
-        vxValueSpan = createSpan(vxSlider.value()).parent(vxGroup);
+        let group = createGroup(
+          "초기 수직 속도 v₀ (m/s) : <strong id='v0Val'>20</strong>"
+        );
+        v0Slider = createSlider(0, 50, 20, 1).parent(group);
+        v0Slider.input(() => {
+          select("#v0Val").html(v0Slider.value());
+          if (!running) resetSimulation();
+        });
 
-        // g 슬라이더
-        const gGroup = createDiv().addClass("control-group").parent(controls);
-        createSpan("중력 가속도 g (m/s²): ").parent(gGroup);
-        gSlider = createSlider(1, 20, 9.8, 0.1).parent(gGroup);
-        gValueSpan = createSpan(gSlider.value()).parent(gGroup);
+        group = createGroup(
+          "초기 수평 속도 vₓ (m/s) : <strong id='vxVal'>20</strong>"
+        );
+        vxSlider = createSlider(0, 50, 20, 1).parent(group);
+        vxSlider.input(() => {
+          select("#vxVal").html(vxSlider.value());
+          if (!running) resetSimulation();
+        });
 
-        // k 슬라이더 (공기 저항 계수)
-        const kGroup = createDiv().addClass("control-group").parent(controls);
-        createSpan("공기 저항 계수 k: ").parent(kGroup);
-        kSlider = createSlider(0, 0.1, 0.02, 0.001).parent(kGroup);
-        kValueSpan = createSpan(kSlider.value()).parent(kGroup);
+        group = createGroup(
+          "중력 가속도 g (m/s²) : <strong id='gVal'>9.8</strong>"
+        );
+        gSlider = createSlider(1, 20, 9.8, 0.1).parent(group);
+        gSlider.input(() => {
+          select("#gVal").html(gSlider.value());
+          if (!running) resetSimulation();
+        });
 
-        // 체크박스 옵션
+        group = createGroup(
+          "공기 저항 계수 k : <strong id='kVal'>0.04</strong>"
+        );
+        kSlider = createSlider(0, 0.2, 0.04, 0.01).parent(group);
+        kSlider.input(() => {
+          select("#kVal").html(kSlider.value().toFixed(2));
+          if (!running) resetSimulation();
+        });
+
+        // 체크박스 & 안내 문구
         const optionsGroup = createDiv()
           .addClass("options-group")
           .parent(controls);
-        airResistance = createCheckbox("공기 저항", false).parent(optionsGroup);
-        record = createCheckbox("0.5초마다 위치 기록", true).parent(
+        airResistance = createCheckbox("공기 저항 (낙하산)", false).parent(
           optionsGroup
         );
+        record = createCheckbox("위치 기록", true).parent(optionsGroup);
+        createSpan("(질량 m = 1 kg 으로 계산)")
+          .parent(optionsGroup)
+          .style("font-size", "14px")
+          .style("margin-top", "8px");
 
-        // 시작/리셋 버튼
+        // 시작/리셋 버튼 생성
         const btnGroup = createDiv()
           .style("margin-top", "20px")
           .parent(controls);
         start = createButton("▶ 시작").parent(btnGroup);
         start.mousePressed(() => {
-          if (!running) {
-            resetBalls();
-            running = true;
+          if (ball1_stopped && ball2_stopped) {
+            resetSimulation(); // 시뮬레이션이 끝난 상태면 리셋 후 시작
           }
+          running = !running; // 실행 상태 토글
         });
         reset = createButton("⟲ 리셋").parent(btnGroup);
-        reset.mousePressed(resetBalls);
-
-        resetBalls();
-      }
-
-      function draw() {
-        background(255);
-
-        // 현재 슬라이더 값 표시
-        v0ValueSpan.html(v0Slider.value());
-        vxValueSpan.html(vxSlider.value());
-        gValueSpan.html(gSlider.value());
-        kValueSpan.html(kSlider.value());
-
-        drawGrid(); // 배경 격자
-        drawSnapshots(); // 기록된 위치 점 그리기
-
-        // 공1 (낙하)
-        fill("rgb(141,206,255)");
-        noStroke();
-        circle(margin, y, ballSize);
-
-        // 공2 (포물선)
-        fill("rgb(255,194,192)");
-        noStroke();
-        circle(x2, y2, ballSize);
-
-        // 시뮬레이션 실행 중이면 물리 업데이트
-        if (running) {
-          updatePhysics();
-          handleSnapshots();
-          if (ball1_stopped && ball2_stopped) running = false;
-        }
+        reset.mousePressed(resetSimulation);
       }
 
       /**
-       * updatePhysics()
-       *
-       * 물리 모델 요약 (단순화)
-       * - 질량 m = 1 (단위 단순화)
-       * - 중력: g (m/s^2). 화면 단위로 변환: gravityForce = g * scale (px/s^2)
-       * - 공기 저항(항력): F_d = -k * v * |v|
-       *   -> 항력은 속도 제곱에 비례하며 방향은 속도 반대
-       * - 수직 방향 미분방정식:
-       *     dv_y/dt = g + (-k * v_y * |v_y|)
-       *   수평 방향 미분방정식(공2):
-       *     dv_x/dt = -k * v_x * |v_x|
-       *
-       * 수치해석 방법 (여기서 사용한 방법)
-       * - 시간 간격 dt = deltaTime / 1000 (초)
-       * - 속도 업데이트: v(t+dt) = v(t) + a(t) * dt
-       * - 위치 업데이트: x(t+dt) = x(t) + v(t+dt) * dt
-       *   -> 코드에서는 '속도를 먼저 업데이트한 다음 그 속도로 위치를 업데이트' 함
-       *   -> 이 방식은 전형적인 명시적 오일러보다 안정성이 약간 나은 준대칭(반응적 오일러, semi-implicit Euler) 방식
-       *
-       * 수치적 고려사항
-       * - dt가 크면 오차가 커지고 불안정해질 수 있음. 일반적으로 프레임 간격(예: 16ms)이면 괜찮음.
-       * - k가 크면 항력이 강해져 속도가 빠르게 감소. 극단적 경우 수치적 진동 발생 가능.
-       *
-       * 경계 처리
-       * - 바닥(ground)에 닿으면 y를 경계 위치로 정하고 '정지' 상태로 표시(튀김 없음)
-       * - 오른쪽 벽(rightWall)에 닿으면 x를 경계 위치로 정하고 '정지' 상태로 표시
-       *
-       * 단순화/가정
-       * - 바운스, 마찰, 회전 등은 고려하지 않음
-       * - 질량 m은 1로 가정했음(실제 물리량을 화면 좌표로 맵핑하는 데 더 신경 써야 함)
+       * 모든 변수를 초기 상태로 리셋
+       */
+      function resetSimulation() {
+        // 슬라이더의 현재 값에 맞춰 시뮬레이션 변수 설정
+        v0 = v0Slider.value();
+        vx0 = vxSlider.value();
+        g = gSlider.value();
+        k = kSlider.value();
+
+        // 공 위치 및 속도 설정 (단위: px, px/s)
+        y = margin;
+        vy = v0 * scale;
+        x2 = margin + 10 * scale;
+        y2 = margin;
+        vx2 = vx0 * scale;
+        vy2 = v0 * scale;
+
+        // 상태 변수 초기화
+        recordList = [];
+        recordTime = 0;
+        time = 0;
+        running = false;
+        ball1_stopped = false;
+        ball2_stopped = false;
+        // '위치 기록'이 체크된 경우에만 0초 위치 기록
+        if (record.checked()) {
+          recordList.push({ y1: y, x2: x2, y2: y2, s1: false, s2: false });
+        }
+
+        // 그래프 관련 변수 초기화
+        dataHistory = [];
+        const m = 1; // 질량은 1kg으로 고정
+        const initial_h = (sim_height - margin - (y2 + ballSize / 2)) / scale;
+
+        // 에너지 그래프의 Y축 최댓값 계산 (매번 변수값이 달라짐에 따라 그래프가 잘리거나 너무 아래에만 그려지는 상황을 방지하기 위함)
+        const initialPE = m * g * initial_h;
+        const v_initial_sq = pow(vx0, 2) + pow(v0, 2);
+        const initialKE = 0.5 * m * v_initial_sq;
+        maxY_energy = initialPE + initialKE;
+        maxY_energy *= 1.1; // 여유 공간 추가
+        if (maxY_energy === 0) maxY_energy = 1;
+
+        // 속도 그래프의 Y축 최댓값 계산
+        let terminalVelocity = null;
+        if (airResistance.checked() && k > 0) {
+          terminalVelocity = sqrt((m * g) / k); // 현재 조건에서의 종단 속도
+        }
+        let vyMax = pow(v0, 2) + 2 * g * initial_h;
+        vyMax = sqrt(vyMax); // 공기 저항 없을 때의 최고 수직 속도
+
+        // (초기 수직 속도, 이론상 최고 수직 속도, 종단 속도) 중 가장 큰 값으로 Y축 최댓값 설정
+        maxY_vel = max(v0, vyMax);
+        if (terminalVelocity) {
+          maxY_vel = max(maxY_vel, terminalVelocity);
+        }
+        maxY_vel *= 1.1; // 여유 공간 추가
+        if (maxY_vel === 0) maxY_vel = 1;
+
+        calculateData(); // 0초 상태의 데이터 기록
+      }
+
+      // ===================================================
+      // 물리 계산 및 데이터 기록 함수
+      // ===================================================
+
+      /**
+       * 물리 상태 계산 (오일러 방법)
        */
       function updatePhysics() {
-        // 프레임 간 시간 간격 (초 단위)
-        let dt = deltaTime / 1000;
-
-        // 슬라이더에서 값 읽기
-        g = gSlider.value();
-        // 공기 저항 계수 k: 체크박스가 켜져 있을 때만 사용
-        const k = airResistance.checked() ? kSlider.value() : 0;
-
-        // 시각화용 변환: m/s^2 -> px/s^2
-        const gravityForce = g * scale;
-
-        // 경계 좌표 (화면 내부)
-        const ground = height - margin;
+        let dt = deltaTime / 1000; // 시간 간격 (초)
+        time += dt;
+        const current_k = airResistance.checked() ? k : 0;
+        const gravityForce = g * scale; // 중력 (px/s^2)
+        const ground = sim_height - margin;
         const rightWall = width - margin;
 
-        // -------------------
-        // 공1: 단순 수직 낙하
-        // 미분방정식: dv_y/dt = g + (-k * v_y * |v_y|)
-        // 수치해석: vy += a * dt; y += vy * dt;
-        // -------------------
+        // 자유 낙하 모델
         if (!ball1_stopped) {
-          // 항력(수직)
-          let airForceY1 = -k * vy * abs(vy); // -k * v * |v|
-          // 총 가속도 (화면 단위)
-          let accY1 = gravityForce + airForceY1;
-          // 속도 업데이트 (semi-implicit Euler: v(t+dt) 계산 후 위치 업데이트)
-          vy += accY1 * dt;
-          // 위치 업데이트 (갱신된 속도로 이동)
-          y += vy * dt;
-
-          // 바닥 충돌 처리: 바닥보다 아래로 가면 경계로 고정하고 정지 상태로 표시
+          let airForceY1 = -(current_k / scale) * vy * vy; // 공기 저항
+          let accY1 = gravityForce + airForceY1; // 총 가속도
+          vy += accY1 * dt; // 속도 업데이트
+          y += vy * dt; // 위치 업데이트
           if (y + ballSize / 2 >= ground) {
-            y = ground - ballSize / 2;
+            y = ground - ballSize / 2; // 바닥 충돌 처리
             ball1_stopped = true;
           }
         }
 
-        // -------------------
-        // 공2: 포물선 (수평+수직)
-        // 수직: dv_y/dt = g + (-k * v_y * |v_y|)
-        // 수평: dv_x/dt = -k * v_x * |v_x|
-        // -------------------
+        // 포물선 모델
         if (!ball2_stopped) {
-          // 수직 항력 및 가속도
-          let airForceY2 = -k * vy2 * abs(vy2);
+          // 수직 방향
+          let airForceY2 = -(current_k / scale) * vy2 * vy2;
           let accY2 = gravityForce + airForceY2;
           vy2 += accY2 * dt;
           y2 += vy2 * dt;
 
-          // 수평 항력 및 속도 업데이트
-          let airForceX2 = -k * vx2 * abs(vx2);
+          // 수평 방향
+          let airForceX2 = -(current_k / scale) * vx2 * vx2;
           vx2 += airForceX2 * dt;
           x2 += vx2 * dt;
 
-          // 경계 체크: 바닥 또는 오른쪽 벽에 닿으면 위치 보정 후 정지
+          // 경계 충돌 처리
           let touchBoundary = false;
           if (y2 + ballSize / 2 >= ground) {
             y2 = ground - ballSize / 2;
@@ -223,11 +287,13 @@
         }
       }
 
-      function handleSnapshots() {
-        // 0.5초마다 위치 기록 (시각화용)
+      /**
+       * 일정 시간(0.3초)마다 공 잔상 기록
+       */
+      function recordTrace() {
         if (record.checked()) {
           recordTime += deltaTime / 1000;
-          if (recordTime >= 0.5) {
+          if (recordTime >= 0.3) {
             recordList.push({
               y1: y,
               x2: x2,
@@ -240,75 +306,255 @@
         }
       }
 
-      function drawSnapshots() {
-        // 저장된 위치를 반투명 원으로 표시
+      /**
+       * 현재 시점의 에너지와 속도 계산 후 배열에 저장
+       */
+      function calculateData() {
+        const m = 1;
+        const h = (sim_height - margin - (y2 + ballSize / 2)) / scale;
+        const potentialEnergy = m * g * max(0, h);
+        const kineticEnergy =
+          0.5 * m * (pow(vx2 / scale, 2) + pow(vy2 / scale, 2));
+        const verticalVelocity = vy2 / scale;
+
+        dataHistory.push({
+          ke: kineticEnergy,
+          pe: potentialEnergy,
+          total: kineticEnergy + potentialEnergy,
+          vy: verticalVelocity,
+        });
+      }
+
+      // ===================================================
+      // 시각화 함수
+      // ===================================================
+
+      /**
+       * 공 그리기
+       */
+      function drawBalls() {
+        fill(0);
+        noStroke();
+        circle(margin, y, ballSize);
+        circle(x2, y2, ballSize);
+      }
+
+      /**
+       * 잔상 그리기
+       */
+      function drawTrace() {
         for (const s of recordList) {
           if (!s.s1) {
-            fill(141, 206, 255, 70);
+            fill(0, 70);
             noStroke();
             circle(margin, s.y1, ballSize);
           }
           if (!s.s2) {
-            fill(255, 194, 192, 70);
+            fill(0, 70);
             noStroke();
             circle(s.x2, s.y2, ballSize);
           }
         }
       }
 
-      function resetBalls() {
-        v0 = v0Slider ? v0Slider.value() : 20;
-        const vx = vxSlider ? vxSlider.value() : 15;
-
-        // 공1 초기화
-        y = margin;
-        vy = v0 * scale;
-
-        // 공2 초기화
-        x2 = margin + 10 * scale;
-        y2 = margin;
-        vx2 = vx * scale;
-        vy2 = v0 * scale;
-
-        recordList = [];
-        recordTime = 0;
-        running = false;
-        ball1_stopped = false;
-        ball2_stopped = false;
-
-        // 초기 위치도 기록
-        recordList.push({
-          y1: y,
-          x2: x2,
-          y2: y2,
-          s1: false,
-          s2: false,
-        });
-      }
-
+      /**
+       * 시뮬레이션 영역 그리드 그리기
+       */
       function drawGrid() {
-        // 눈금선 및 숫자 표시
+        push();
         fill(150);
         stroke(180);
         strokeWeight(0.5);
         textSize(10);
         textAlign(CENTER, CENTER);
+        textStyle(NORMAL);
 
-        // y축 격자
-        for (let yPos = margin; yPos <= height - margin; yPos += scale * 5) {
+        // y축 눈금
+        for (
+          let yPos = margin;
+          yPos <= sim_height - margin;
+          yPos += scale * 5
+        ) {
           line(margin, yPos, width - margin, yPos);
           let gridY = (yPos - margin) / scale;
-          if (gridY % 5 === 0) text(round(gridY), margin - 25, yPos);
+          if (gridY % 5 === 0) {
+            text(round(gridY), margin - 25, yPos);
+          }
+        }
+        // x축 눈금
+        for (let xPos = margin; xPos <= width - margin; xPos += scale * 5) {
+          line(xPos, margin, xPos, sim_height - margin);
+          let gridX = (xPos - margin) / scale;
+          if (gridX % 5 === 0) {
+            text(round(gridX), xPos, sim_height - margin + 20);
+          }
+        }
+        pop();
+      }
+
+      /**
+       * 경과 시간 표시
+       */
+      function drawTimeText() {
+        push();
+        textAlign(RIGHT, TOP);
+        noStroke();
+        fill(0);
+        textSize(14);
+        textStyle(BOLD);
+        text(`경과 시간: ${time.toFixed(1)}s`, width - margin, 20);
+        pop();
+      }
+
+      /**
+       * 그래프(에너지, 속도) 그리기
+       */
+      function drawGraphs() {
+        push();
+        translate(0, sim_height); // 그래프 영역으로 원점 이동
+
+        const graphWidth = width / 2;
+        const padding = 40;
+
+        const plotData = (dataKey, c, yMax, history, gWidth) => {
+          if (history.length < 2) return;
+          stroke(c);
+          strokeWeight(1.5);
+          noFill();
+          beginShape();
+          for (let i = 0; i < history.length; i++) {
+            const x = map(i, 0, history.length - 1, padding, gWidth - padding);
+            const y = map(
+              history[i][dataKey],
+              0,
+              yMax,
+              graph_height - padding,
+              padding
+            );
+            vertex(x, y);
+          }
+          endShape();
+        };
+
+        // --- 1: 에너지 그래프 ---
+        push();
+        fill(255);
+        noStroke();
+        rect(0, 0, graphWidth, graph_height);
+
+        textAlign(LEFT, TOP);
+        fill(0);
+        textSize(13);
+        textStyle(BOLD);
+        text("[ 에너지 그래프 ]", padding, 10);
+        stroke(220);
+        strokeWeight(1);
+        line(padding, padding, padding, graph_height - padding); // Y축
+        line(
+          padding,
+          graph_height - padding,
+          graphWidth - padding,
+          graph_height - padding
+        ); // X축
+
+        // Y축 눈금
+        textAlign(RIGHT, CENTER);
+        textStyle(NORMAL);
+        textSize(10);
+        noStroke();
+        fill(120);
+        for (let i = 0; i <= 4; i++) {
+          const e = (i / 4) * maxY_energy;
+          const y = map(e, 0, maxY_energy, graph_height - padding, padding);
+          text(e.toFixed(1), padding - 5, y);
         }
 
-        // x축 격자
-        for (let xPos = margin; xPos <= width - margin; xPos += scale * 5) {
-          line(xPos, margin, xPos, height - margin);
-          let gridX = (xPos - margin) / scale;
-          if (gridX % 5 === 0) text(round(gridX), xPos, height - margin + 20);
+        // 데이터 플로팅
+        plotData("pe", color(196, 0, 0), maxY_energy, dataHistory, graphWidth);
+        plotData("ke", color(0, 50, 170), maxY_energy, dataHistory, graphWidth);
+        plotData("total", color(0), maxY_energy, dataHistory, graphWidth);
+
+        // 에너지 종류 표기
+        noStroke();
+        textAlign(CENTER);
+        textStyle(NORMAL);
+        textSize(12);
+        fill(196, 0, 0);
+        text("위치 E", padding + 30, graph_height - 20);
+        fill(0, 50, 170);
+        text("운동 E", padding + 90, graph_height - 20);
+        fill(0);
+        text("총 E", padding + 150, graph_height - 20);
+        pop();
+
+        // --- 2: 수직 속도 그래프 ---
+        push();
+        translate(graphWidth, 0);
+        fill(255);
+        noStroke();
+        rect(0, 0, graphWidth, graph_height);
+        textStyle(BOLD);
+        textAlign(LEFT, TOP);
+        fill(0);
+        textSize(13);
+        text("[ 수직 속도 그래프 (m/s) ]", padding, 10);
+        stroke(220);
+        strokeWeight(1);
+        line(padding, padding, padding, graph_height - padding);
+        line(
+          padding,
+          graph_height - padding,
+          graphWidth - padding,
+          graph_height - padding
+        );
+
+        // Y축 눈금
+        textAlign(RIGHT, CENTER);
+        textSize(10);
+        noStroke();
+        fill(120);
+        textStyle(NORMAL);
+        for (let i = 0; i <= 4; i++) {
+          const v = (i / 4) * maxY_vel;
+          const y = map(v, 0, maxY_vel, graph_height - padding, padding);
+          text(v.toFixed(1), padding - 5, y);
         }
+
+        // 종단 속도 점근선 & 텍스트 (체크박스 상태에 따라 표시)
+        if (airResistance.checked() && k > 0) {
+          const m = 1;
+          const currentTerminalVelocity = sqrt((m * g) / k);
+          const y_tv = map(
+            currentTerminalVelocity,
+            0,
+            maxY_vel,
+            graph_height - padding,
+            padding
+          );
+          if (y_tv >= padding && y_tv <= graph_height - padding) {
+            push();
+            stroke(255, 100, 0, 150);
+            strokeWeight(1.5);
+            drawingContext.setLineDash([5, 5]); // 점선
+            line(padding, y_tv, graphWidth - padding, y_tv);
+            drawingContext.setLineDash([]); // 점선 해제
+            fill(255, 100, 0);
+            noStroke();
+            textAlign(RIGHT, BOTTOM);
+            textSize(11);
+            text(
+              `종단 속도: ${currentTerminalVelocity.toFixed(2)} m/s`,
+              graphWidth - padding,
+              y_tv - 2
+            );
+            pop();
+          }
+        }
+
+        // 데이터 플로팅
+        plotData("vy", color(0), maxY_vel, dataHistory, graphWidth);
+        pop();
       }
     </script>
   </body>
 </html>
-

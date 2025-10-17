@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <title>이중 진자 운동</title>
+    <script src="https://cdn.jsdelivr.net/npm/p5@1.7.0/lib/p5.min.js"></script>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>이중 진자 운동 | 카오스 효과 시각화 | 물리 실험 시뮬레이터</h1>
+      <a href="index.html">← 메인으로</a>
+    </header>
+    <main>
+      <div id="canvas-container"></div>
+      <div id="controls-container">
+        <div id="ui-controls"></div>
+      </div>
+    </main>
+    <script>
+      // ===================================================
+      // 전역 변수
+      // ===================================================
+
+      // --- 캔버스 관련 변수 ---
+      const sim_height = 350; // 시뮬레이션 영역 높이
+      const graph_height = 270; // 그래프 영역 높이
+      const total_height = sim_height + graph_height;
+      let originX, originY; // 진자 고정점 좌표
+
+      // --- 물리 관련 변수 ---
+      let L1, L2, m1, m2, g; // 길이(L), 질량(m), 중력가속도(g)
+      let theta1, omega1, theta2, omega2; // 모델1(기본 모델)의 각도, 각속도
+      let theta1_chaos, omega1_chaos, theta2_chaos, omega2_chaos; // 모델 2(카오스 비교군)의 각도, 각속도
+      let time = 0; // 경과 시간
+
+      // --- 시뮬레이션 상태 관련 변수 ---
+      let running = false; // 시뮬레이션 실행 여부
+      let chaosModel = false; // 카오스 모델 표시 여부
+      let trace = false; // 궤적 표시 여부
+      let theta1_0, theta2_0; // 초기 각도 (라디안)
+
+      // --- UI 관련 변수 ---
+      let startBtn, resetBtn, chaosCheckbox, traceCheckbox;
+      let theta1Slider,
+        theta2Slider,
+        length1Slider,
+        length2Slider,
+        mass1Slider,
+        mass2Slider;
+
+      // --- 데이터 기록 관련 변수 ---
+      let energyHistory = []; // 에너지 데이터
+      let maxY; // 에너지 그래프 Y축 최댓값
+      let traceHistory = []; // 궤적 좌표
+
+      // ===================================================
+      // p5.js
+      // ===================================================
+
+      function setup() {
+        const canvas = createCanvas(600, total_height);
+        canvas.parent("canvas-container");
+        originX = width / 2;
+        originY = 70;
+
+        initializeControls(); // UI 컨트롤 요소 생성 및 설정
+        resetSimulation(); // 모든 변수를 초기 상태로 리셋
+      }
+
+      function draw() {
+        background(255); // 캔버스 배경 흰색
+        UI_update(); // 슬라이더 값에 따른 텍스트 화면 업데이트
+
+        // 'running' 상태일 때만 물리 계산 실행
+        if (running) {
+          let dt = min(deltaTime / 1000, 1 / 60); // 프레임 간 시간 간격(dt) 계산
+          const step = 5;
+          for (let i = 0; i < step; i++) {
+            // 기본 모델 물리 계산
+            let currentState = [theta1, omega1, theta2, omega2];
+            let nextState = rk4(derivatives, currentState, dt / step);
+            [theta1, omega1, theta2, omega2] = nextState;
+
+            // 카오스 모델 활성화 시 카오스 모델 물리 계산
+            if (chaosModel) {
+              let currentStateChaos = [
+                theta1_chaos,
+                omega1_chaos,
+                theta2_chaos,
+                omega2_chaos,
+              ];
+              let nextStateChaos = rk4(
+                derivatives,
+                currentStateChaos,
+                dt / step
+              );
+              [theta1_chaos, omega1_chaos, theta2_chaos, omega2_chaos] =
+                nextStateChaos;
+            }
+          }
+          time += dt; // 경과 시간 누적
+          Energy(); // 현재 에너지 값 기록
+
+          // 궤적 좌표 저장
+          if (trace) {
+            const x2_trace = originX + L1 * sin(theta1) + L2 * sin(theta2);
+            const y2_trace = originY + L1 * cos(theta1) + L2 * cos(theta2);
+            traceHistory.push(createVector(x2_trace, y2_trace));
+          }
+        }
+
+        drawTrace(); // 궤적 그리기
+        pendulum(); // 진자 시뮬레이션 그리기
+        graph(); // 에너지 그래프 그리기
+      }
+
+      // ===================================================
+      // 시뮬레이션 설정 함수
+      // ===================================================
+
+      /**
+       * 슬라이더, 버튼, 체크박스
+       */
+      function initializeControls() {
+        const controls = select("#ui-controls");
+        const createGroup = (labelText) => {
+          const group = createDiv().addClass("control-group").parent(controls);
+          createSpan(labelText).parent(group);
+          return group;
+        };
+
+        let group;
+        group = createGroup(
+          "θ₁ (초기 각도 1): <strong id='theta1Val'>90°</strong>"
+        );
+        theta1Slider = createSlider(-180, 180, 30, 1)
+          .parent(group)
+          .style("width", "100%");
+        group = createGroup(
+          "θ₂ (초기 각도 2): <strong id='theta2Val'>90°</strong>"
+        );
+        theta2Slider = createSlider(-180, 180, 30, 1)
+          .parent(group)
+          .style("width", "100%");
+        group = createGroup(
+          "길이 1 (L₁): <strong id='length1Val'>120</strong>"
+        );
+        length1Slider = createSlider(50, 200, 120, 1)
+          .parent(group)
+          .style("width", "100%");
+        group = createGroup(
+          "길이 2 (L₂): <strong id='length2Val'>120</strong>"
+        );
+        length2Slider = createSlider(50, 200, 120, 1)
+          .parent(group)
+          .style("width", "100%");
+        group = createGroup("질량 1 (m₁): <strong id='mass1Val'>10</strong>");
+        mass1Slider = createSlider(1, 15, 5, 0.5)
+          .parent(group)
+          .style("width", "100%");
+        group = createGroup("질량 2 (m₂): <strong id='mass2Val'>10</strong>");
+        mass2Slider = createSlider(1, 15, 5, 0.5)
+          .parent(group)
+          .style("width", "100%");
+
+        const options = createDiv().addClass("options-group").parent(controls);
+        chaosCheckbox = createCheckbox(
+          "카오스 모델 보기 (θ₁ + 0.01)",
+          false
+        ).parent(options);
+        chaosCheckbox.changed(() => {
+          chaosModel = chaosCheckbox.checked();
+          resetSimulation();
+        });
+
+        traceCheckbox = createCheckbox("궤적 그리기", false).parent(options);
+        traceCheckbox.changed(() => {
+          trace = traceCheckbox.checked();
+          if (trace) {
+            traceHistory = [];
+          }
+        });
+
+        const btnGroup = createDiv().style("margin-top:20px").parent(controls);
+        startBtn = createButton("▶ 시작").parent(btnGroup);
+        startBtn.mousePressed(() => (running = !running));
+        resetBtn = createButton("⟲ 리셋").parent(btnGroup);
+        resetBtn.mousePressed(resetSimulation);
+      }
+
+      /**
+       * UI 컨트롤의 현재 값으로 변수 리셋
+       */
+      function resetSimulation() {
+        // 물리 변수 초기화
+        L1 = length1Slider.value();
+        L2 = length2Slider.value();
+        m1 = mass1Slider.value();
+        m2 = mass2Slider.value();
+        g = 9.8 * 40;
+
+        theta1_0 = radians(theta1Slider.value());
+        theta2_0 = radians(theta2Slider.value());
+
+        // 기본 모델 초기화
+        theta1 = theta1_0;
+        theta2 = theta2_0;
+        omega1 = 0;
+        omega2 = 0;
+
+        // 카오스 모델 초기화
+        theta1_chaos = theta1_0 + 0.01;
+        theta2_chaos = theta2_0;
+        omega1_chaos = 0;
+        omega2_chaos = 0;
+
+        // 상태 초기화
+        running = false;
+        time = 0;
+        energyHistory = [];
+        traceHistory = [];
+
+        // maxY 계산
+        let h1_initial = L1 * (1 - cos(theta1_0));
+        let h2_initial = h1_initial + L2 * (1 - cos(theta2_0));
+        maxY = m1 * g * h1_initial + m2 * g * h2_initial;
+        maxY *= 1.1; //여유분 추가
+        if (maxY <= 0) maxY = 1; // 0으로 나누는 것 방지
+
+        Energy(); // 0초 상태의 에너지 기록
+      }
+
+      // ===================================================
+      // 물리 계산 함수
+      // ===================================================
+
+      /**
+       * 상태 벡터 y = [θ₁, ω₁, θ₂, ω₂]를 입력받아서 dy/dt = [ω₁, α₁, ω₂, α₂] 리턴
+       */
+      function derivatives(y) {
+        const [th1, om1, th2, om2] = y;
+
+        //alpha1 구하기
+        const x1 = -g * (2 * m1 + m2) * sin(th1);
+        const x2 = -m2 * g * sin(th1 - 2 * th2);
+        const x3 =
+          -2 *
+          sin(th1 - th2) *
+          m2 *
+          (om2 * om2 * L2 + om1 * om1 * L1 * cos(th1 - th2));
+        const a = L1 * (2 * m1 + m2 - m2 * cos(2 * th1 - 2 * th2));
+        const alpha1 = (x1 + x2 + x3) / a;
+
+        //alpha2 구하기
+        const y1 = 2 * sin(th1 - th2);
+        const y2 = om1 * om1 * L1 * (m1 + m2);
+        const y3 = g * (m1 + m2) * cos(th1);
+        const y4 = om2 * om2 * L2 * m2 * cos(th1 - th2);
+        const b = L2 * (2 * m1 + m2 - m2 * cos(2 * th1 - 2 * th2));
+        const alpha2 = (y1 * (y2 + y3 + y4)) / b;
+
+        return [om1, alpha1, om2, alpha2];
+      }
+
+      /**
+       * 4차 룽게-쿠타(RK4) 방법을 사용하여 다음 스텝 계산
+       */
+      function rk4(f, y, dt) {
+        const n = y.length;
+        const k1 = f(y);
+        const y_k2 = new Array(n);
+        for (let i = 0; i < n; i++) y_k2[i] = y[i] + 0.5 * dt * k1[i];
+        const k2 = f(y_k2);
+        const y_k3 = new Array(n);
+        for (let i = 0; i < n; i++) y_k3[i] = y[i] + 0.5 * dt * k2[i];
+        const k3 = f(y_k3);
+        const y_k4 = new Array(n);
+        for (let i = 0; i < n; i++) y_k4[i] = y[i] + dt * k3[i];
+        const k4 = f(y_k4);
+        const y_next = new Array(n);
+        for (let i = 0; i < n; i++) {
+          y_next[i] = y[i] + (dt / 6) * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]);
+        }
+        return y_next;
+      }
+
+      /**
+       * (기본 모델 기준) 운동 에너지, 위치 에너지를 계산하여 energyHistory에 추가
+       */
+      function Energy() {
+        let h1 = L1 * (1 - cos(theta1));
+        let h2 = h1 + L2 * (1 - cos(theta2));
+        const potentialEnergy = m1 * g * h1 + m2 * g * h2;
+        const v1squared = pow(L1 * omega1, 2);
+        const v2squared =
+          pow(L1 * omega1, 2) +
+          pow(L2 * omega2, 2) +
+          2 * L1 * L2 * omega1 * omega2 * cos(theta1 - theta2);
+        const kineticEnergy = 0.5 * m1 * v1squared + 0.5 * m2 * v2squared;
+        energyHistory.push({
+          ke: kineticEnergy,
+          pe: potentialEnergy,
+          total: kineticEnergy + potentialEnergy,
+        });
+        if (energyHistory.length > 300) energyHistory.shift();
+      }
+
+      // ===================================================
+      // UI 업데이트 및 시각화 함수
+      // ===================================================
+
+      /**
+       * 컨트롤 패널의 텍스트 값을 현재 슬라이더 값으로 업데이트
+       */
+      function UI_update() {
+        select("#theta1Val").html(theta1Slider.value() + "°");
+        select("#theta2Val").html(theta2Slider.value() + "°");
+        select("#length1Val").html(length1Slider.value());
+        select("#length2Val").html(length2Slider.value());
+        select("#mass1Val").html(mass1Slider.value());
+        select("#mass2Val").html(mass2Slider.value());
+        startBtn.html(running ? "⏸ 정지" : "▶ 시작");
+        if (!running && frameCount > 1) {
+          const slidersChanged =
+            theta1_0 !== radians(theta1Slider.value()) ||
+            theta2_0 !== radians(theta2Slider.value()) ||
+            L1 !== length1Slider.value() ||
+            L2 !== length2Slider.value() ||
+            m1 !== mass1Slider.value() ||
+            m2 !== mass2Slider.value();
+          if (slidersChanged) resetSimulation();
+        }
+      }
+
+      /**
+       * 궤적 그리기
+       */
+      function drawTrace() {
+        if (!trace || traceHistory.length < 2) {
+          return;
+        }
+        push();
+        stroke(255, 10, 150, 150);
+        strokeWeight(1);
+        noFill();
+        beginShape();
+        for (let p of traceHistory) {
+          vertex(p.x, p.y);
+        }
+        endShape();
+        pop();
+      }
+
+      /**
+       * 진자 그리기
+       */
+      function pendulum() {
+        const bobSize1 = 12 + m1;
+        const bobSize2 = 12 + m2;
+
+        // 카오스 모델 (회색)
+        if (chaosModel) {
+          const x1_chaos = originX + L1 * sin(theta1_chaos);
+          const y1_chaos = originY + L1 * cos(theta1_chaos);
+          const x2_chaos = x1_chaos + L2 * sin(theta2_chaos);
+          const y2_chaos = y1_chaos + L2 * cos(theta2_chaos);
+          stroke(150);
+          strokeWeight(1);
+          line(originX, originY, x1_chaos, y1_chaos);
+          line(x1_chaos, y1_chaos, x2_chaos, y2_chaos);
+          fill(150);
+          ellipse(x1_chaos, y1_chaos, bobSize1, bobSize1);
+          ellipse(x2_chaos, y2_chaos, bobSize2, bobSize2);
+        }
+
+        // 기본 모델 (검은색)
+        const x1 = originX + L1 * sin(theta1);
+        const y1 = originY + L1 * cos(theta1);
+        const x2 = x1 + L2 * sin(theta2);
+        const y2 = y1 + L2 * cos(theta2);
+        stroke(0);
+        strokeWeight(1.5);
+        line(originX, originY, x1, y1);
+        line(x1, y1, x2, y2);
+        fill(0);
+        ellipse(x1, y1, bobSize1, bobSize1);
+        ellipse(x2, y2, bobSize2, bobSize2);
+
+        // 고정점
+        fill(0);
+        ellipse(originX, originY, 10, 10);
+
+        // 상태 텍스트
+        push();
+        textStyle(BOLD);
+        textSize(14);
+        fill(0);
+        noStroke();
+
+        // 카오스 모델 텍스트
+        if (chaosModel) {
+          textAlign(LEFT, TOP);
+          fill(150);
+          text("[ 카오스 비교 모델 ]", 20, 20);
+        }
+
+        fill(0);
+        textAlign(RIGHT, TOP);
+        text(`경과 시간: ${time.toFixed(1)}s`, width - 20, 20);
+        pop();
+      }
+
+      /**
+       * 에너지 그래프 그리기
+       */
+      function graph() {
+        push();
+        translate(0, sim_height);
+        fill(255);
+        noStroke();
+        rect(0, 0, width, graph_height);
+        textStyle(BOLD);
+        const padding = 40;
+        textAlign(LEFT, TOP);
+        noStroke();
+        fill(0);
+        textSize(16);
+        text("[ 에너지 그래프 ]", padding, 15);
+        if (energyHistory.length < 2) {
+          pop();
+          return;
+        }
+        stroke(220);
+        strokeWeight(1);
+        line(padding, padding, padding, graph_height - padding);
+        line(
+          padding,
+          graph_height - padding,
+          width - padding,
+          graph_height - padding
+        );
+
+        // 에너지 데이터 플로팅
+        const plotData = (dataKey, c) => {
+          stroke(c);
+          strokeWeight(1.5);
+          noFill();
+          beginShape();
+          for (let i = 0; i < energyHistory.length; i++) {
+            const x = map(
+              i,
+              0,
+              energyHistory.length - 1,
+              padding,
+              width - padding
+            );
+            const y = map(
+              energyHistory[i][dataKey],
+              0,
+              maxY,
+              graph_height - padding,
+              padding
+            );
+            vertex(x, y);
+          }
+          endShape();
+        };
+        plotData("pe", color(196, 0, 0));
+        plotData("ke", color(0, 50, 170));
+        plotData("total", color(0));
+
+        // 에너지 종류 표기
+        noStroke();
+        textAlign(CENTER);
+        textStyle(BOLD);
+        textSize(13);
+        fill(196, 0, 0);
+        text("위치 E", 100, graph_height - 30);
+        fill(0, 50, 170);
+        text("운동 E", 180, graph_height - 30);
+        fill(0);
+        text("총 E", 250, graph_height - 30);
+        pop();
+      }
+    </script>
+  </body>
+</html>

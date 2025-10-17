@@ -2,24 +2,36 @@
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
-    <title>물리 실험 시뮬레이터</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>웹 기반 물리 애니메이션 프로젝트</title>
     <link rel="stylesheet" href="style.css" />
   </head>
-  <body>
+  <body class="main-page">
     <!-- 상단 배너 -->
     <header>
-      <h1>물리 실험 시뮬레이터</h1>
-      <p>여러 가지 물리 현상을 직접 시뮬레이션해보세요!</p>
+      <h1>물리 실험 시뮬레이터 | Physics Simulation</h1>
     </header>
 
-    <!-- 실험 썸네일 -->
+    <!-- 실험 썸네일 그리드 -->
     <main class="grid">
-      <a href="ex1.html" class="card">실험 1</a>
-      <a href="ex2.html" class="card">실험 2</a>
-      <a href="ex3.html" class="card">실험 3</a>
-      <a href="ex4.html" class="card">실험 4</a>
-      <a href="ex5.html" class="card">실험 5</a>
-      <a href="ex6.html" class="card">실험 6</a>
+      <a href="ex1.html" class="card">
+        <img src="썸네일1.png" alt="실험 1 썸네일" />
+        <div class="card-content">
+          <h3>낙하 및 포물선 운동 : 공기 저항과 종단 속도</h3>
+        </div>
+      </a>
+      <a href="ex2.html" class="card">
+        <img src="썸네일2.png" alt="실험 2 썸네일" />
+        <div class="card-content">
+          <h3>단진자 운동 : 비선형/선형 모델 비교</h3>
+        </div>
+      </a>
+      <a href="ex3.html" class="card">
+        <img src="썸네일3.png" alt="실험 3 썸네일" />
+        <div class="card-content">
+          <h3>이중 진자 운동 : 카오스 효과 시각화</h3>
+        </div>
+      </a>
     </main>
   </body>
 </html>

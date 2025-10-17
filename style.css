@@ -1,39 +1,92 @@
 /* --- 기본 & 폰트 설정 --- */
-@import url("https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap");
 
 body {
   margin: 0;
   font-family: "Noto Sans KR", sans-serif;
   background-color: #f4f7f9;
-  color: #333;
+  color: #343434;
 }
 
-/* --- 헤더 --- */
+/* --- 헤더 (공용) --- */
 header {
   background: white;
-  color: #333;
-  padding: 15px 40px;
+  padding: 20px 40px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
 }
 
 header h1 {
   margin: 0;
-  font-size: 22px;
+  font-size: 24px;
 }
 
 header a {
   text-decoration: none;
-  color: #0152a9;
+  color: #ba4260;
   font-weight: 500;
 }
 
-/* --- 메인 레이아웃 (캔버스 + 컨트롤 패널) --- */
-main {
+/* --- 메인 페이지 전용 스타일 --- */
+
+/* 메인 페이지 헤더 가운데 정렬 */
+body.main-page header {
+  justify-content: center;
+}
+
+/* 메인 페이지 그리드: 1x3 카드 정렬 */
+body.main-page main.grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 30px;
+  padding: 40px;
+  max-width: 950px;
+  margin: 0 auto;
+}
+
+/* 메인 페이지 카드(썸네일) */
+.main-page .card {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+  text-decoration: none;
+  color: inherit;
   display: flex;
-  flex-wrap: wrap; /* 화면이 작아지면 컨트롤 패널이 아래로 내려가도록 설정 */
+  flex-direction: column;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.main-page .card:hover {
+  transform: translateY(-8px);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.12);
+}
+
+.main-page .card img {
+  width: 100%;
+  height: 170px;
+  object-fit: cover;
+  display: block;
+}
+
+.main-page .card-content {
+  padding: 20px;
+  text-align: center;
+}
+
+.main-page .card-content h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* --- 실험 페이지 레이아웃 --- */
+
+body:not(.main-page) main {
+  display: flex;
+  flex-wrap: wrap;
   justify-content: center;
   gap: 30px;
   padding: 30px;
@@ -46,9 +99,12 @@ main {
   overflow: hidden;
 }
 
-/* ✅ [추가된 부분] 에너지 그래프 컨테이너 스타일 */
+#canvas-container canvas {
+  display: block; /* 캔버스 아래 불필요한 여백 제거 */
+}
+
 #graph-container {
-  margin-top: 20px; /* 시뮬레이션 캔버스와의 간격 */
+  margin-top: 20px;
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
   border-radius: 8px;
   overflow: hidden;
@@ -62,7 +118,7 @@ main {
   width: 300px;
 }
 
-/* --- 컨트롤 그룹 (슬라이더 + 라벨) --- */
+/* --- 실험 페이지 컨트롤 UI (공용) --- */
 .control-group {
   margin-bottom: 20px;
 }
@@ -70,12 +126,11 @@ main {
 .control-group span {
   display: block;
   font-size: 14px;
-  margin-bottom: 8px; /* 슬라이더와의 간격 */
+  margin-bottom: 8px;
 }
 
-/* --- 버튼 --- */
 button {
-  background-color: #007bff;
+  background-color: #bd2448;
   color: white;
   border: none;
   border-radius: 5px;
@@ -88,50 +143,50 @@ button {
 }
 
 button:hover {
-  background-color: #0056b3;
+  background-color: #73172c;
 }
 
 button:active {
   transform: scale(0.98);
 }
 
-/* --- 슬라이더 --- */
+/* 슬라이더 기본 스타일 초기화 */
 input[type="range"] {
-  -webkit-appearance: none;
+  -webkit-appearance: none; /* 브라우저 기본 스타일 제거 */
   appearance: none;
   width: 100%;
   height: 6px;
   background: #e9ecef;
   border-radius: 5px;
   outline: none;
-  vertical-align: middle;
 }
 
+/* 슬라이더 핸들 스타일 (웹킷: 크롬, 사파리) */
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
   width: 16px;
   height: 16px;
-  background: #007bff;
+  background: #bd2448;
   border-radius: 50%;
   cursor: pointer;
 }
 
+/* 슬라이더 핸들 스타일 (게코: 파이어폭스) */
 input[type="range"]::-moz-range-thumb {
   width: 16px;
   height: 16px;
-  background: #007bff;
+  background: #bd2448;
   border-radius: 50%;
   cursor: pointer;
   border: none;
 }
 
-/* --- 체크박스 --- */
 .options-group {
   margin-top: 10px;
   font-size: 14px;
   display: flex;
-  flex-direction: column; /* 세로 방향 정렬 */
-  align-items: flex-start; /* 왼쪽 정렬 */
-  gap: 8px; /* 체크박스 사이 간격 */
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
 }

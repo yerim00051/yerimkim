@@ -8,7 +8,7 @@
   </head>
   <body>
     <header>
-      <h1>단진자 운동</h1>
+      <h1>단진자 운동 | 비선형/선형 모델 비교 | 물리 실험 시뮬레이터</h1>
       <a href="index.html">← 메인으로</a>
     </header>
     <main>
@@ -118,7 +118,7 @@
       }
 
       /**
-       * UI 컨트롤의 현재 값에 맞춰 변수 리셋
+       * 슬라이더의 현재 값에 맞춰 변수 리셋
        */
       function resetSimulation() {
         // 물리 변수 초기화
@@ -129,7 +129,7 @@
         omega_linear = 0;
         L = lengthSlider.value();
         m = massSlider.value();
-        g = 9.8 * 20; // 중력가속도 9.8 m/s^2 (픽셀 스케일 적용)
+        g = 9.8 * 40; // 중력가속도 9.8 m/s^2 (픽셀 스케일 적용)
         damping = dampSlider.value();
 
         // 상태 변수 초기화
@@ -139,6 +139,7 @@
         // 그래프 데이터 초기화
         energyHistory = [];
         maxY = m * g * (L * (1 - Math.cos(theta0)));
+        maxY *= 1.1; //여유분 추가
         if (maxY === 0) maxY = 1; // 0으로 나누는 것 방지
         Energy(); // 0초 상태의 에너지 기록
       }
@@ -241,7 +242,7 @@
       }
 
       /**
-       * 두 진자(비선형, 선형)와 경과 시간 표시
+       * 두 진자(비선형, 선형) & 경과 시간 표시
        */
       function pendulum() {
         textStyle(BOLD);
@@ -249,24 +250,22 @@
         const bobY = originY + L * Math.cos(theta);
         const bobX_linear = originX + L * Math.sin(theta_linear);
         const bobY_linear = originY + L * Math.cos(theta_linear);
-        const bobSize = constrain(10 + m * 6, 8, 60);
+        const bobSize = constrain(20 + m * 6, 8, 60);
 
-        // 선형 모델 (점선, 반투명 파랑)
-        stroke(150);
-        strokeWeight(1);
-        drawingContext.setLineDash([5, 5]);
-        line(originX, originY, bobX_linear, bobY_linear);
-        drawingContext.setLineDash([]);
+        // 선형 모델 (빨간색)
         stroke(0);
-        strokeWeight(1);
-        fill(50, 50, 180, 150);
+        strokeWeight(1.5);
+        line(originX, originY, bobX_linear, bobY_linear);
+        fill(203, 17, 71);
+        stroke(203, 17, 71);
         ellipse(bobX_linear, bobY_linear, bobSize, bobSize);
 
-        // 비선형 모델 (실선, 빨강)
+        // 비선형 모델 (파란색)
         stroke(0);
-        strokeWeight(2);
+        strokeWeight(1.5);
         line(originX, originY, bobX, bobY);
-        fill(180, 50, 50);
+        fill(46, 51, 152);
+        stroke(46, 51, 152);
         ellipse(bobX, bobY, bobSize, bobSize);
 
         // 고정점
@@ -278,9 +277,9 @@
         textAlign(LEFT);
         textSize(14);
         noStroke();
-        fill(180, 50, 50);
-        text("비선형 모델 (sin θ)", 20, 30);
-        fill(50, 50, 180);
+        fill(46, 51, 152);
+        text("비선형 모델 (sinθ)", 20, 30);
+        fill(203, 17, 71);
         text("선형 근사 모델 (θ)", 20, 50);
 
         // 경과 시간
@@ -309,7 +308,7 @@
         noStroke();
         fill(0);
         textSize(16);
-        text("[ 에너지 그래프 ]", padding, 15);
+        text("[ 에너지 그래프 (비선형) ]", padding, 15);
 
         if (energyHistory.length < 2) {
           pop();
@@ -330,7 +329,7 @@
         // 에너지 데이터 플로팅
         const plotData = (dataKey, c) => {
           stroke(c);
-          strokeWeight(2);
+          strokeWeight(1.5);
           noFill();
           beginShape();
           for (let i = 0; i < energyHistory.length; i++) {
@@ -353,20 +352,20 @@
           endShape();
         };
 
-        plotData("pe", color(220, 50, 50)); // 위치 에너지
-        plotData("ke", color(50, 50, 220)); // 운동 에너지
-        plotData("total", color(0)); // 총 에너지
+        plotData("pe", color(159, 151, 198)); // 위치 에너지
+        plotData("ke", color(151, 198, 192)); // 운동 에너지
+        plotData("total", color(46, 51, 152)); // 총 에너지
 
         // 에너지 종류 표기
         noStroke();
         textAlign(CENTER);
         textStyle(BOLD);
         textSize(13);
-        fill(220, 50, 50);
+        fill(159, 151, 198);
         text("위치 E", 100, graph_height - 30);
-        fill(50, 50, 220);
+        fill(151, 198, 192);
         text("운동 E", 180, graph_height - 30);
-        fill(0);
+        fill(46, 51, 152);
         text("총 E", 250, graph_height - 30);
 
         pop(); // 이전 좌표계, 설정으로 복원
@@ -374,4 +373,3 @@
     </script>
   </body>
 </html>
-
